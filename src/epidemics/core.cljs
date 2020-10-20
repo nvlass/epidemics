@@ -130,7 +130,7 @@
                                                      (count (-> @app-state :graph :r))
                                                      "-")]]
       [:tr
-       [:td {:colSpan 6} "Click on a node to place patient(s) zero"]]]]))
+       [:td {:colSpan 6} "Click on one or more nodes to place patients zero and start the simulation"]]]]))
 
 
 ;; UGLY UGLY
