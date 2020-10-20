@@ -86,14 +86,40 @@
   edge { width: 0.1; }
   ")
 
+
+;; UGLY UGLY
+(defn step-sim []
+  (swap! app-state
+         update :graph
+         #(g/step % (:prob @app-state) (:inf-days @app-state)))
+  (update-cy @app-state)
+  (swap! app-state update :days inc))
+
+(defn stop-sim []
+  (swap! app-state assoc :is-running false))
+
+(defn toggle-sim []
+  (if-not (:is-running @app-state)
+    ;; start and step
+    (do
+      (swap! app-state assoc :is-running true)
+      (a/go-loop []
+        ;; FIXME: sloppy, results in 1s + sim time
+        (a/alt! (a/timeout 1000) ([_] (step-sim) (recur))
+                (:ctrl-chan @app-state) ([_] (stop-sim)))))
+    ;; stop
+    (a/go
+      (a/>! (:ctrl-chan @app-state) :stop))))
+
 (defn init-graph []
   ;; UGLY UGLY
-  (let [_          (swap! app-state assoc :loading true)
-        {:keys
-         [nnodes
-          beta
-          degree]} @app-state
-        chan-res   (a/chan)]
+  (let [_                (when (:is-running @app-state)
+                           (toggle-sim))
+        _                (swap! app-state assoc :loading true :days 0)
+        {:keys [nnodes
+                beta
+                degree]} @app-state
+        chan-res         (a/chan)]
     ;; do the work
     (a/go
       (let [graph (g/epidemic-graph nnodes degree beta)
@@ -116,6 +142,30 @@
       (let [{:keys [graph ccy]} (a/<! chan-res)]
         (swap! app-state assoc :graph graph :cy ccy :loading false)))))
 
+
+(defn instructions []
+  [:div
+   [:h5 "Instructions"]
+   [:p "Select the number of individuals (>= 100) and the average
+number of people each one of them meets every day (default 4). The
+beta parameter changes the form of the graph. The disease transmission
+probability is the probablity that the disease is transmitted to a
+healthy individual when it meets an infected one. An infected
+individual is infectious for a specific number of days (7 by
+default)"]
+   [:p "Press \"Init Graph\" to initialize the simulation and click on
+   one or more nodes to add the initially infected individuals (marked
+   with red color). Press start to start the simulation and watch how
+   the infection spreads with time (measured in days)."]
+   [:p "If you accidentally zoom in or out press \"Reset Zoom\" to fit
+   the graph in the window"]])
+
+
+(defn- perc [{:keys [graph nnodes]}]
+  (* (/ (+ (count (:i graph)) (count (:r graph)))
+        nnodes)
+     100))
+
 (defn statistics []
   (if (:loading @app-state)
     "LOADING GRAPH"
@@ -123,42 +173,19 @@
      [:tbody
       [:tr
        [:td [:b "Days"]] [:td (:days @app-state)]
-       [:td [:b "Infected"]] [:td (or
-                                   (count (-> @app-state :graph :i))
-                                   "-")]
-       [:td [:b "Removed (dead / recovered)"]] [:td (or
-                                                     (count (-> @app-state :graph :r))
-                                                     "-")]]
+       [:td [:b "Infected"]] [:td (or (count (-> @app-state :graph :i))
+                                      "-")]
+       [:td [:b "Removed (dead / recovered)"]] [:td (or (count (-> @app-state :graph :r))
+                                                        "-")]
+       [:td [:b "Percentage Infected + Recovered"]] [:td (or (perc @app-state)
+                                        "-")]]
       [:tr
-       [:td {:colSpan 6} "Click on one or more nodes to place patients zero and start the simulation"]]]]))
-
-
-;; UGLY UGLY
-(defn step-sim []
-  (swap! app-state
-         update :graph
-         #(g/step % (:prob @app-state) (:inf-days @app-state)))
-  (update-cy @app-state)
-  (swap! app-state update :days inc))
-
-(defn stop-sim []
-  (swap! app-state assoc :is-running false))
-
-(defn toggle-sim []
-  (if-not (:is-running @app-state)
-    ;; start and step
-    (do
-      (swap! app-state assoc :is-running true)
-      (a/go-loop []
-        (a/alt! (a/timeout 1000) ([_] (step-sim) (recur))
-                (:ctrl-chan @app-state) ([_] (stop-sim)))))
-    ;; stop
-    (a/go
-      (a/>! (:ctrl-chan @app-state) :stop))))
+       [:td {:colSpan 8} "Click on one or more nodes to place patients zero and start the simulation"]]]]))
 
 (defn epidemic-model []
   [:div.container {:style {:height "100%"}}
    [:h3 "Epidemic Spreading Simulation on a Graph"]
+   [instructions]
    [:h5 "See " [:a {:href "https://github.com/nvlass/epidemics"} "README"] " for model info"]
    [:form
     [:div.row
